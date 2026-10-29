@@ -46,3 +46,7 @@ The installer is unsigned; keep security protection enabled.
 
 See [build instructions](BUILD.md). Licensed under [MIT](LICENSE.md).
 Game files and assets are not included.
+
+## Support
+
+[Support on Ko-fi](https://ko-fi.com/leafbuckets01).
