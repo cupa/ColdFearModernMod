@@ -1,0 +1,10 @@
+/build/
+/dist/
+/packages/
+__pycache__/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+.vs/

@@ -1,0 +1,26 @@
+LIBRARY ColdFearModernControls
+EXPORTS
+    Controls DATA
+    HookTitlePrompt
+    HookMenuDevice
+    HookInput
+    HookBasis
+    HookPitch
+    HookYaw
+    HookFacing
+    HookDistance
+    HookRun
+    HookAlternateAim
+    HookReload
+    HookSelect
+    HookPadFrame
+    HookPadHeld
+    HookPadPressed
+    HookPadAxis
+    HookMenuFrame
+    HookRawPressed
+    HookRawHeld
+    HookRawReleased
+    HookPadReleased
+    HookMelee
+    ValidateEngine=_ValidateEngine@4
