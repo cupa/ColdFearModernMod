@@ -49,4 +49,4 @@ Game files and assets are not included.
 
 ## Support
 
-[Support on Ko-fi](https://ko-fi.com/leafbuckets01).
+You can support me by donating at my [Kofi](https://ko-fi.com/leafbuckets01).
