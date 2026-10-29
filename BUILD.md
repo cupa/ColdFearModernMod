@@ -18,6 +18,6 @@ The installer build also tests removal, backups, rollback and save preservation.
 `setup/` contains the installer, uninstaller and resource generation.
 `config/` holds defaults; `scripts/` holds launch tools.
 
-Hooks target the executable hash in README.md. Keep compatibility checks intact.
+Hooks target the supported Steam executable. Keep compatibility checks intact.
 A 64-bit build is unsupported. When changing versions, update build scripts,
 package names, source banners, manifests and documentation together.

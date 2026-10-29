@@ -34,8 +34,7 @@ Saves and backups are kept. See [installation details](INSTALL.md).
 
 ## Compatibility
 
-Requires the original Steam executable, app 15270:
-`b512f1d47fb85a41c784c71d987044f204cfec900fa9a61f28778dd05e351131`.
+Only supports the Steam version of Cold Fear. The GOG version is untested.
 
 Alt-Tab can cause white or corrupted graphics; return to the main menu and reload,
 or restart. Tight spaces can cause camera clipping. Full-campaign coverage,
