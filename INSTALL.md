@@ -1,6 +1,6 @@
 # Install
 
-Download the installer ZIP from [Releases](https://github.com/cupa/ColdFearModerMod/releases/latest).
+Download the installer ZIP from [Releases](https://github.com/cupa/ColdFearModernMod/releases/latest).
 Extract it, close the game and helper, then run the Setup EXE. Confirm the game
 folder and approve administrator access if Windows requests it. Launch via Steam.
 

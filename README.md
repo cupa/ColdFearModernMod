@@ -5,7 +5,7 @@ resolutions for the Windows Steam version of Cold Fear.
 
 ## Download and install
 
-1. Download the **installer ZIP** from [Releases](https://github.com/cupa/ColdFearModerMod/releases/latest).
+1. Download the **installer ZIP** from [Releases](https://github.com/cupa/ColdFearModernMod/releases/latest).
 2. Extract it and close Cold Fear and its camera helper.
 3. Run `ColdFearModernThirdPerson-0.6.14-Setup.exe` and confirm the game folder.
 4. Launch through Steam. **F4** toggles the mod.
