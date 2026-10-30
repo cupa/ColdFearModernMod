@@ -3,6 +3,9 @@
 Third-person exploration, camera-relative movement, controller support and extra
 resolutions for the Windows Steam version of Cold Fear.
 
+See it in action here:
+https://www.youtube.com/watch?v=iu89ArFWV0w
+
 ## Download and install
 
 1. Download the **installer ZIP** from [Releases](https://github.com/cupa/ColdFearModernMod/releases/latest).
