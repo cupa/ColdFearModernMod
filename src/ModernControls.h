@@ -32,6 +32,7 @@ struct ModernState {
     int32_t snapAfterDoors,doorLocked,doorSnapPending,doorSnapCount;
     uint32_t cameraHero;
     int32_t lastController;
+    int32_t useGameInput;
 };
 static_assert(offsetof(ModernState,backMenuFrame)==280 && offsetof(ModernState,scriptCamera)==312,"Menu hook layout");
 static_assert(offsetof(ModernState,backMelee)==260,"Melee hook layout");

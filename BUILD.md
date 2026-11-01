@@ -18,6 +18,11 @@ The installer build also tests removal, backups, rollback and save preservation.
 `setup/` contains the installer, uninstaller and resource generation.
 `config/` holds defaults; `scripts/` holds launch tools.
 
-Hooks target the supported Steam executable. Keep compatibility checks intact.
+Hooks validate the supported Steam or GOG executable code. Keep compatibility checks intact.
 A 64-bit build is unsupported. When changing versions, update build scripts,
 package names, source banners, manifests and documentation together.
+
+The installer detects supported executables by SHA-256 and selects the Steam or
+GOG payload. The helper detects the running build and uses GOG's input wrapper
+when appropriate. The GOG package excludes the Steam display proxy.
+`[Graphics] FixAltTab=1` in ColdFearDisplay.ini enables the Steam blend, texture-state and focus corrections.

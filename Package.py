@@ -2,15 +2,22 @@ from hashlib import sha256
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
-VERSION = "0.6.14"
+VERSION = "0.6.15"
 ROOT = Path(__file__).resolve().parent
 PLAYER_FILES = (
-    "ColdFearThirdPerson.exe", "ColdFearModernControls.dll", "dinput8.dll",
+    "ColdFearModern.exe", "ColdFearThirdPerson.exe", "ColdFearModernControls.dll", "dinput8.dll",
     "Camera.ini", "ColdFearDisplay.ini", "Enable.cmd", "Disable.cmd",
     "Toggle.cmd", "Status.cmd", "README.md", "CONTROLS.md",
     "LICENSE.md", "INSTALL.md", "Uninstall.exe",
 )
+GOG_FILES = (
+    "ColdFearModern.exe", "ColdFearThirdPerson.exe", "ColdFearModernControls.dll",
+    "Camera.ini", "Enable.cmd", "Disable.cmd", "Toggle.cmd", "Status.cmd",
+    "README.md", "CONTROLS.md", "LICENSE.md", "INSTALL.md", "Uninstall.exe",
+)
 SOURCE_FILES = (
+    ".gitignore", ".gitattributes", ".github/FUNDING.yml",
+    "BuildGog.cmd", "src/Launch.cpp", "src/GameEdition.h",
     "Build.cmd", "Test.cmd", "Package.py", "README.md", "CONTROLS.md",
     "BUILD.md", "LICENSE.md", "INSTALL.md", "BuildInstaller.cmd",
     "setup/Uninstall.h", "setup/Setup.cpp", "setup/TestSetup.cpp", "setup/Prepare.py",
@@ -45,12 +52,12 @@ def write_zip(path, root, names):
 def main():
     destination = ROOT / "packages"
     destination.mkdir(exist_ok=True)
-    player = destination / f"ColdFearModernThirdPerson-{VERSION}.zip"
+    player = destination / f"ColdFearModernThirdPerson-{VERSION}-Steam.zip"
     source = destination / f"ColdFearModernThirdPerson-{VERSION}-source.zip"
     write_zip(player, ROOT / "dist", PLAYER_FILES)
     write_zip(source, ROOT, SOURCE_FILES)
     archives = [player, source]
-    installer = destination / "ColdFearModernThirdPerson-0.6.14-Setup.exe"
+    installer = destination / "ColdFearModernThirdPerson-0.6.15-Setup.exe"
     if installer.is_file():
         installer_zip = destination / f"ColdFearModernThirdPerson-{VERSION}-installer.zip"
         with ZipFile(installer_zip, "w", compression=ZIP_DEFLATED) as archive:
@@ -58,9 +65,13 @@ def main():
             archive.write(ROOT / "dist/Uninstall.exe", "Uninstall.exe")
             for name in ("INSTALL.md", "README.md", "CONTROLS.md", "LICENSE.md"):
                 archive.write(ROOT / name, name)
-        uninstaller = destination / "ColdFearModernThirdPerson-0.6.14-Uninstall.exe"
+        uninstaller = destination / "ColdFearModernThirdPerson-0.6.15-Uninstall.exe"
         uninstaller.write_bytes((ROOT / "dist/Uninstall.exe").read_bytes())
         archives.extend((installer, installer_zip, uninstaller))
+    if (ROOT / "dist/gog/Uninstall.exe").is_file():
+        gog = destination / f"ColdFearModernThirdPerson-{VERSION}-GOG.zip"
+        write_zip(gog, ROOT / "dist/gog", GOG_FILES)
+        archives.append(gog)
     hashes = [f"{sha256(path.read_bytes()).hexdigest()}  {path.name}" for path in archives]
     (destination / "SHA256SUMS.txt").write_text("\n".join(hashes) + "\n", encoding="ascii")
     print("Created player ZIP, source ZIP and SHA256SUMS.txt in packages.")

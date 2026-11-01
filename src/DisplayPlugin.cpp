@@ -9,7 +9,20 @@
 #pragma comment(lib,"user32.lib")
 static Display::Modes modes;
 static uintptr_t gameBase;
-static uintptr_t afterStartup,afterCycle,afterLabel,nativeInit;
+static uintptr_t afterStartup,afterCycle,afterLabel,nativeInit,afterBlend;
+static bool fixAltTab=true;
+// Normalize an invalid D3DRS_BLENDOP during device recovery.
+static __declspec(naked) void hookBlend(){__asm{
+    mov eax,[esp+4]
+    mov ecx,[esp+8]
+    cmp eax,171
+    jne nativeBlend
+    cmp ecx,-1
+    jne nativeBlend
+    mov ecx,1
+ nativeBlend:
+    jmp dword ptr [afterBlend]
+}}
 static wchar_t gameFolder[MAX_PATH],settingsPath[MAX_PATH],resolutionPath[MAX_PATH],logPath[MAX_PATH];
 static bool installed;
 static HWND gameWindow;
@@ -163,24 +176,32 @@ static BOOL WINAPI startupClip(const RECT* requested) {
     (void)requested;return TRUE;
 #endif
 }
-struct Patch {uint32_t rva;const BYTE* expected;size_t length;const void* destination;bool call=false;};
+struct Patch {uint32_t rva;const BYTE* expected;size_t length;const void* destination;bool call=false;bool bytes=false;};
 static bool installPatches() {
     static const BYTE startup[]={0x8d,0x4d,0xc0,0x51,0xe8,0xce,0x0f,0x00,0x00};
     static const BYTE cycle[]={0x81,0xff,0xe6,0x00,0x00,0x00};
     static const BYTE label[]={0x8b,0x8b,0xb8,0xd3,0x00,0x00};
     static const BYTE save[]={0x55,0x8b,0xec,0x8b,0x45,0x08};
     static const BYTE clip[]={0xff,0x15,0x1c,0x53,0x8a,0x00};
+    static const BYTE blend[]={0x8b,0x44,0x24,0x04,0x8b,0x4c,0x24,0x08};
+    static const BYTE coldCache[]={0x89,0x58,0xfc},resetCache[]={0x89,0x68,0xfc},zeroCache[]={0x89,0x50,0xfc};
+    static const BYTE focusPause[]={0x74,0x05},skipPause[]={0xeb,0x05};
     const Patch patches[]={{0x2949,startup,sizeof(startup),hookStartup},{0xc750,cycle,sizeof(cycle),hookCycle},
-        {0xc7c3,label,sizeof(label),hookLabel},{0x92b0,save,sizeof(save),saveResolution},{0x22b8,clip,sizeof(clip),startupClip,true}};
-    constexpr size_t patchCount=sizeof(patches)/sizeof(patches[0]);
+        {0xc7c3,label,sizeof(label),hookLabel},{0x92b0,save,sizeof(save),saveResolution},{0x22b8,clip,sizeof(clip),startupClip,true},
+        {0x239810,blend,sizeof(blend),hookBlend},
+        {0x23a143,coldCache,sizeof(coldCache),zeroCache,false,true},
+        {0x23a7a3,resetCache,sizeof(resetCache),zeroCache,false,true},
+        {0x2843,focusPause,sizeof(focusPause),skipPause,false,true}};
+    size_t patchCount=sizeof(patches)/sizeof(patches[0])-(fixAltTab?0:4);
     // Signatures target the fixed-base Steam executable.
 #ifndef DISPLAY_TEST
     if(gameBase!=0x400000)return false;
 #endif
-    for(const auto& p:patches)if(memcmp(reinterpret_cast<void*>(gameBase+p.rva),p.expected,p.length))return false;
-    DWORD protections[patchCount]{};
+    for(size_t i=0;i<patchCount;++i){const auto& p=patches[i];if(memcmp(reinterpret_cast<void*>(gameBase+p.rva),p.expected,p.length))return false;}
+    DWORD protections[sizeof(patches)/sizeof(patches[0])]{};
     size_t unlocked=0;
-    for(const auto& p:patches){
+    for(size_t i=0;i<patchCount;++i){
+        const auto& p=patches[i];
         if(!VirtualProtect(reinterpret_cast<void*>(gameBase+p.rva),p.length,PAGE_EXECUTE_READWRITE,&protections[unlocked]))break;
         ++unlocked;
     }
@@ -188,15 +209,18 @@ static bool installPatches() {
         for(size_t i=0;i<unlocked;++i){DWORD ignored;VirtualProtect(reinterpret_cast<void*>(gameBase+patches[i].rva),patches[i].length,protections[i],&ignored);}
         return false;
     }
+    afterBlend=gameBase+0x239818;
     afterStartup=gameBase+0x2952;nativeInit=gameBase+0x3920;afterCycle=gameBase+0xc793;afterLabel=gameBase+0xc894;
     for(size_t i=0;i<patchCount;++i){
         const auto& p=patches[i];BYTE* target=reinterpret_cast<BYTE*>(gameBase+p.rva);
+        if(p.bytes){memcpy(target,p.destination,p.length);FlushInstructionCache(GetCurrentProcess(),target,p.length);continue;}
         target[0]=p.call?0xe8:0xe9;int32_t displacement=static_cast<int32_t>(reinterpret_cast<uintptr_t>(p.destination)-reinterpret_cast<uintptr_t>(target)-5);
         memcpy(target+1,&displacement,4);memset(target+5,0x90,p.length-5);
         FlushInstructionCache(GetCurrentProcess(),target,p.length);
     }
     // Restore shared-page protections in reverse order.
     for(size_t i=patchCount;i-- >0;){DWORD ignored;VirtualProtect(reinterpret_cast<void*>(gameBase+patches[i].rva),patches[i].length,protections[i],&ignored);}
+    if(fixAltTab)logLine("Alt-Tab blend, texture-stage cache and focus-handler corrections installed.\r\n");
     installed=true;logLine("Resolution menu extension installed. Selection applies on next launch.\r\n");return true;
 }
 #ifndef DISPLAY_TEST
@@ -217,6 +241,7 @@ static void configure() {
     GetModuleFileNameW(nullptr,gameFolder,MAX_PATH);
     wchar_t* slash=wcsrchr(gameFolder,L'\\');if(slash)*slash=0;
     swprintf_s(settingsPath,L"%s\\ColdFearDisplay.ini",gameFolder);
+    fixAltTab=GetPrivateProfileIntW(L"Graphics",L"FixAltTab",1,settingsPath)!=0;
     swprintf_s(resolutionPath,L"%s\\res.bin",gameFolder);
     swprintf_s(logPath,L"%s\\ColdFearDisplay.log",gameFolder);
     uint32_t width=GetPrivateProfileIntW(L"Display",L"NativeWidth",0,settingsPath);
@@ -236,7 +261,7 @@ static void startCameraHelper(){
     wchar_t helper[MAX_PATH];swprintf_s(helper,L"%s\\ColdFearThirdPerson.exe",gameFolder);
     DWORD attributes=GetFileAttributesW(helper);
     if(attributes==INVALID_FILE_ATTRIBUTES||(attributes&FILE_ATTRIBUTE_DIRECTORY))return;
-    wchar_t command[MAX_PATH+64];swprintf_s(command,L"\"%s\" --enable --wait-ready",helper);
+    wchar_t command[MAX_PATH+96];swprintf_s(command,L"\"%s\" --enable --wait-ready --pid %lu",helper,GetCurrentProcessId());
     STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
     if(CreateProcessW(helper,command,nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,gameFolder,&startup,&process)){
         CloseHandle(process.hThread);CloseHandle(process.hProcess);logLine("Camera/controller helper started automatically.\r\n");

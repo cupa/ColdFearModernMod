@@ -1,4 +1,4 @@
-// Cold Fear Third Person v0.6.14. MIT license.
+// Cold Fear Third Person v0.6.15. MIT license.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
@@ -9,7 +9,10 @@
 #include <vector>
 #include <cstdlib>
 #include <cmath>
+#include <io.h>
+#include <share.h>
 #include "ModernControls.h"
+#include "GameEdition.h"
 #include "CursorConfinement.h"
 #pragma comment(lib,"user32.lib")
 
@@ -19,20 +22,21 @@ struct Handle {
     ~Handle() { if (h && h != INVALID_HANDLE_VALUE) CloseHandle(h); }
     operator HANDLE() const { return h; }
 };
-struct Target { DWORD pid; uintptr_t base; };
+struct Target { DWORD pid; uintptr_t base; Edition edition; };
 static bool allowSessionUpdate=false;
+static DWORD requestedPid=0;
 static Target findGame() {
     Handle snapshot(CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0));
     PROCESSENTRY32W entry{}; entry.dwSize=sizeof(entry);
     DWORD pid=0; unsigned count=0;
     if(Process32FirstW(snapshot,&entry)) do {
-        if(!_wcsicmp(entry.szExeFile,L"coldfear_retail.exe")) {pid=entry.th32ProcessID; ++count;}
+        if(!_wcsicmp(entry.szExeFile,L"coldfear_retail.exe")&&(!requestedPid||entry.th32ProcessID==requestedPid)) {pid=entry.th32ProcessID; ++count;}
     } while(Process32NextW(snapshot,&entry));
     if(count!=1) return {};
     Handle modules(CreateToolhelp32Snapshot(TH32CS_SNAPMODULE|TH32CS_SNAPMODULE32,pid));
     MODULEENTRY32W mod{}; mod.dwSize=sizeof(mod);
     if(!Module32FirstW(modules,&mod)) return {};
-    return {pid,reinterpret_cast<uintptr_t>(mod.modBaseAddr)};
+    return {pid,reinterpret_cast<uintptr_t>(mod.modBaseAddr),editionFromImageSize(mod.modBaseSize)};
 }
 static bool read(HANDLE h,uintptr_t address,void* data,size_t size) {
     SIZE_T done=0;
@@ -47,7 +51,7 @@ static bool writeByte(HANDLE h,uintptr_t address,BYTE value) {
     BYTE actual=0;
     return ok&&flushed&&restored&&read(h,address,&actual,1)&&actual==value;
 }
-// Steam build 2775; preserve special-event slot 3.
+// Preserve special-event camera slot 3.
 static std::vector<BYTE> expected(uintptr_t base) {
     BYTE bytes[]={
         0x8a,0x83,0xdd,0x16,0,0,0x5f,0x84,0xc0,0x5e,0x74,4,0x6a,3,0xeb,0x50,
@@ -69,11 +73,12 @@ static std::vector<BYTE> expected(uintptr_t base) {
 }
 static int run(const char* action,bool selectorHook=false) {
     Target t=findGame();
-    if(!t.pid) {puts("Start Cold Fear through Steam first. Keep only one copy running."); return 2;}
+    if(!t.pid) {puts("Start Cold Fear first. Keep only one copy running."); return 2;}
     bool status=!strcmp(action,"--status"), enable=!strcmp(action,"--enable");
     Handle h(OpenProcess(status ? PROCESS_VM_READ|PROCESS_QUERY_INFORMATION :
         PROCESS_VM_READ|PROCESS_VM_WRITE|PROCESS_VM_OPERATION|PROCESS_QUERY_INFORMATION,FALSE,t.pid));
     if(!h.h) {printf("Cannot access Cold Fear (Windows error %lu). Run at the same privilege level as the game.\n",GetLastError()); return 3;}
+    if(t.edition==Edition::Unknown){puts("Unsupported game version. Nothing changed.");return 5;}
     auto reference=expected(t.base); std::vector<BYTE> current(reference.size());
     uintptr_t start=t.base+0xa5144;
     if(!read(h,start,current.data(),current.size())) {puts("Cannot read camera selector. Nothing changed."); return 4;}
@@ -205,6 +210,7 @@ struct ModernLink {
         configuration.explorationDistance=distance;configuration.transitionSeconds=transition;configuration.modernMode=modern;configuration.holdShift=shift;
         configuration.returnSeconds=sceneReturn;configuration.resumeElapsed=sceneReturn;configuration.rReload=reload;
         configuration.snapAfterDoors=pad.snapAfterDoors;
+        configuration.useGameInput=t.edition==Edition::Gog;
         configuration.controllerEnabled=pad.controllerEnabled;configuration.padIndex=pad.padIndex;
         configuration.moveDeadzone=pad.moveDeadzone;configuration.lookDeadzone=pad.lookDeadzone;
         configuration.lookSpeed=pad.lookSpeed;configuration.aimScale=pad.aimScale;
@@ -238,6 +244,7 @@ static int watch(float distance,const wchar_t* dllPath,bool modern,float sensiti
     eventName(name,128,L"Stop",t.pid); Handle stop(CreateEventW(nullptr,TRUE,FALSE,name));
     eventName(name,128,L"Toggle",t.pid); Handle toggle(CreateEventW(nullptr,FALSE,FALSE,name));
     if(!stop.h||!toggle.h) return 8;
+    printf("Detected %s version.\n",t.edition==Edition::Gog?"GOG":"Steam");
     ModernLink controls;
     if(!controls.attach(h,t,dllPath,sensitivity,distance,transition,modern,shift,sceneReturn,reload,pad)){controls.restore();puts("Could not attach controls. Restart Cold Fear before retrying.");return 9;}
     bool enabled=true; int result=run("--enable",true);
@@ -283,14 +290,18 @@ int main(int argc,char** argv) {
     auto dpi=reinterpret_cast<DpiContext>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetThreadDpiAwarenessContext"));
     if(dpi){if(!dpi(reinterpret_cast<HANDLE>(-4)))dpi(reinterpret_cast<HANDLE>(-3));}
     else SetProcessDPIAware();
-    puts("Cold Fear Third Person v0.6.14 (experimental)\n");
+    puts("Cold Fear Third Person v0.6.15 \n");
     const char* action=argc>1?argv[1]:"--enable";
     for(int i=2;i<argc;++i)if(!strcmp(argv[i],"--allow-session-update"))allowSessionUpdate=true;
+    for(int i=2;i<argc;++i)if(!strcmp(argv[i],"--pid")&&i+1<argc) {
+        char* end=nullptr;unsigned long value=strtoul(argv[++i],&end,10);
+        if(!value||!end||*end){puts("Invalid game PID.");return 1;}requestedPid=value;
+    }
     bool waitReady=false;
     for(int i=2;i<argc;++i)if(!strcmp(argv[i],"--wait-ready"))waitReady=true;
     if(waitReady&&!strcmp(action,"--enable")) {
         wchar_t log[MAX_PATH];GetModuleFileNameW(nullptr,log,MAX_PATH);wchar_t* slash=wcsrchr(log,L'\\');
-        if(slash){wcscpy_s(slash+1,MAX_PATH-static_cast<size_t>(slash+1-log),L"ColdFearCamera.log");FILE* file=nullptr;_wfreopen_s(&file,log,L"a",stdout);}
+        if(slash){wcscpy_s(slash+1,MAX_PATH-static_cast<size_t>(slash+1-log),L"ColdFearCamera.log");FILE* file=_wfsopen(log,L"a",_SH_DENYNO);if(file){_dup2(_fileno(file),_fileno(stdout));fclose(file);}}
         puts("Waiting for Cold Fear's renderer and input manager before attaching...");fflush(stdout);
         bool ready=false;
         for(unsigned attempt=0;attempt<300;++attempt){

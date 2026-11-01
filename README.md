@@ -1,7 +1,7 @@
 # Cold Fear Modern Third Person
 
 Third-person exploration, camera-relative movement, controller support and extra
-resolutions for the Windows Steam version of Cold Fear.
+resolutions for Cold Fear on Windows (Steam and GOG).
 
 See it in action here:
 https://www.youtube.com/watch?v=iu89ArFWV0w
@@ -10,11 +10,12 @@ https://www.youtube.com/watch?v=iu89ArFWV0w
 
 1. Download the **installer ZIP** from [Releases](https://github.com/cupa/ColdFearModernMod/releases/latest).
 2. Extract it and close Cold Fear and its camera helper.
-3. Run `ColdFearModernThirdPerson-0.6.14-Setup.exe` and confirm the game folder.
-4. Launch through Steam. **F4** toggles the mod.
+3. Run the Setup EXE and confirm the game folder. Steam or GOG is detected automatically.
+4. Steam: launch through Steam. GOG: run `ColdFearModern.exe`. **F4** toggles the mod.
 
-For manual installation, extract the player ZIP beside `coldfear_retail.exe`.
-Do not overwrite another mod's `dinput8.dll`.
+For manual installation, extract the matching Steam or GOG player ZIP beside `coldfear_retail.exe`.
+The GOG package keeps GOG's input and display fixes.
+Do not install the Steam package over GOG or another input proxy.
 
 ## Features
 
@@ -28,7 +29,7 @@ Do not overwrite another mod's `dinput8.dll`.
 
 WASD moves, mouse looks, right mouse aims, left mouse shoots or shoves,
 Shift runs, R reloads and Ctrl crouches. See [all controls](CONTROLS.md).
-Edit `Camera.ini` and `ColdFearDisplay.ini` to configure the mod.
+Edit `Camera.ini` to configure the camera and controls. Steam display settings use `ColdFearDisplay.ini`.
 
 ## Uninstall
 
@@ -37,10 +38,11 @@ Saves and backups are kept. See [installation details](INSTALL.md).
 
 ## Compatibility
 
-Only supports the Steam version of Cold Fear. The GOG version is untested.
+Targets the original Steam build and the GOG Preservation build.
+GOG uses its existing input wrapper; controller mappings follow this mod's layout.
 
-Alt-Tab can cause white or corrupted graphics; return to the main menu and reload,
-or restart. Tight spaces can cause camera clipping. Full-campaign coverage,
+Steam includes the verified Alt-Tab graphics correction. Tight spaces can cause
+camera clipping. Full-campaign coverage,
 SteamOS/Proton and physical 4K/Steam Deck testing are incomplete.
 Other executable versions and overlapping camera/input mods are unsupported.
 The installer is unsigned; keep security protection enabled.

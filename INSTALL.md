@@ -2,10 +2,13 @@
 
 Download the installer ZIP from [Releases](https://github.com/cupa/ColdFearModernMod/releases/latest).
 Extract it, close the game and helper, then run the Setup EXE. Confirm the game
-folder and approve administrator access if Windows requests it. Launch via Steam.
+folder. The installer detects Steam or GOG and installs the appropriate files.
+If both are installed, select the desired folder. Approve administrator access
+if Windows requests it. Launch via Steam, or run `ColdFearModern.exe` for GOG.
 
-For manual installation, extract the player ZIP beside `coldfear_retail.exe`.
-Back up existing files first. Do not replace another mod's `dinput8.dll`.
+For manual installation, extract the matching Steam or GOG player ZIP beside `coldfear_retail.exe`.
+Back up existing files first. The GOG package keeps `dinput8.dll`, `dixi.ini`
+and GOG resolution settings. Never install the Steam package over GOG.
 
 Existing settings are preserved. The installer backs up replaced files in
 `ColdFearModernBackup`. No game executable or assets are supplied.

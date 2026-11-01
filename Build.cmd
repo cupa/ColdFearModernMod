@@ -11,9 +11,12 @@ cl /nologo /W4 /WX /O2 /MT /EHsc /std:c++17 /Fo:build\ColdFearThirdPerson.obj /F
 if errorlevel 1 goto failed
 cl /nologo /W4 /WX /O2 /MT /EHsc /std:c++17 /LD /Fo:build\DisplayPlugin.obj /Fe:dist\dinput8.dll src\DisplayPlugin.cpp /link /DEF:src\DisplayPlugin.def /NOIMPLIB /MACHINE:X86 /DYNAMICBASE /NXCOMPAT /Brepro
 if errorlevel 1 goto failed
+cl /nologo /W4 /WX /O2 /MT /EHsc /std:c++17 /DUNICODE /D_UNICODE /Fo:build\Launch.obj /Fe:dist\ColdFearModern.exe src\Launch.cpp /link /SUBSYSTEM:WINDOWS /MACHINE:X86 /DYNAMICBASE /NXCOMPAT /Brepro user32.lib shell32.lib
+if errorlevel 1 goto failed
 move /y dist\ColdFearModernControls.exp build\ >nul
 move /y dist\dinput8.exp build\ >nul
-copy /y config\*.ini dist\ >nul
+copy /y config\Camera.ini dist\ >nul
+copy /y config\ColdFearDisplay.ini dist\ >nul
 if errorlevel 1 goto failed
 for %%F in (Enable Disable Toggle Status) do copy /y scripts\%%F.cmd dist\ >nul
 for %%F in (README.md CONTROLS.md LICENSE.md INSTALL.md) do copy /y %%F dist\ >nul

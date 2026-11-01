@@ -352,6 +352,13 @@ int main() {
         fstp titleFloatAfter
     }
     check(titleResult==reinterpret_cast<uint32_t>(original)&&titleFloatAfter==deviceFloatBefore,"title lookup hook preserves pointer, stack and floating point context");
+    Controller::clear();Controls.useGameInput=1;Controls.padIndex=-1;Controls.controllerEnabled=Controls.enabled=1;
+    Controller::connected[0]=true;Controller::samples[0]={};PlayStation::connected=true;PlayStation::sample={};
+    Controller::poll();Controller::samples[0].Gamepad.sThumbRX=25000;Controller::poll();
+    check(Controls.padConnected==1&&Controls.padRX>0,"GOG normalized controller feeds the camera");
+    Controller::connected[0]=Controller::connected[1]=false;Controller::poll();
+    check(!Controls.padConnected,"GOG input never opens a second Sony HID device");
+    Controls.useGameInput=0;
     VirtualFree(globals,0,MEM_RELEASE);
     puts("Controller polling, analog, button, reconnect and assembly checks passed.");return 0;
 }

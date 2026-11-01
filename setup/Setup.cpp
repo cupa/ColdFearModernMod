@@ -12,9 +12,22 @@
 #include <vector>
 #include <stdexcept>
 #include "Payload.h"
+#include "../src/GameEdition.h"
 namespace fs=std::filesystem;
-static constexpr wchar_t title[]=L"Cold Fear Modern Third Person 0.6.14";
-static constexpr char gameHash[]="b512f1d47fb85a41c784c71d987044f204cfec900fa9a61f28778dd05e351131";
+static constexpr wchar_t title[]=L"Cold Fear Modern Third Person 0.6.15";
+struct PayloadView {
+    const PayloadFile* first;size_t count;
+    const PayloadFile* begin() const{return first;}
+    const PayloadFile* end() const{return first+count;}
+};
+static constexpr PayloadView steamFiles{steamPayload,sizeof(steamPayload)/sizeof(*steamPayload)};
+static constexpr PayloadView gogFiles{gogPayload,sizeof(gogPayload)/sizeof(*gogPayload)};
+static Edition edition=Edition::Steam;
+static PayloadView payload=steamFiles;
+static void selectEdition(Edition selected) {
+    if(selected==Edition::Unknown)throw std::runtime_error("Unsupported Cold Fear executable. No files were changed.");
+    edition=selected;payload=selected==Edition::Gog?gogFiles:steamFiles;
+}
 struct Resource {const BYTE* bytes;DWORD size;};
 static Resource resource(int id) {
     HMODULE module=GetModuleHandleW(nullptr);
@@ -48,16 +61,17 @@ static std::vector<BYTE> readFile(const fs::path& path) {
 }
 static std::string fileHash(const fs::path& path){auto bytes=readFile(path);return digest(bytes.data(),bytes.size());}
 static void verifyPayload() {
-    for(const auto& item:payload) {
+    for(const auto& files:{steamFiles,gogFiles})for(const auto& item:files) {
         Resource data=resource(item.id);
         if(digest(data.bytes,data.size)!=item.hash)throw std::runtime_error("Installer payload checksum mismatch.");
     }
 }
-static bool supportedGame(const fs::path& folder) {
+static Edition detectGame(const fs::path& folder) {
     fs::path game=folder/L"coldfear_retail.exe";
-    return fs::is_regular_file(game)&&fileHash(game)==gameHash;
+    return fs::is_regular_file(game)?editionFromHash(fileHash(game).c_str()):Edition::Unknown;
 }
 static bool knownProxy(const fs::path& path) {
+    if(edition==Edition::Gog)return true;
     if(!fs::exists(path))return true;
     auto hash=fileHash(path);
     for(const char* allowed:knownProxies)if(hash==allowed)return true;
@@ -75,7 +89,7 @@ static std::string vdfValue(const std::string& text,const char* key) {
     std::regex pattern(std::string("\"")+key+"\"\\s*\"((?:\\\\.|[^\"\\\\])*)\"");
     std::smatch match;return std::regex_search(text,match,pattern)?match[1].str():std::string{};
 }
-static fs::path libraryGame(const fs::path& library) {
+[[maybe_unused]] static fs::path libraryGame(const fs::path& library) {
     fs::path apps=library/L"steamapps",manifest=apps/L"appmanifest_15270.acf";
     if(!fs::is_regular_file(manifest))return {};
     auto bytes=readFile(manifest);std::string text(bytes.begin(),bytes.end());
@@ -83,7 +97,14 @@ static fs::path libraryGame(const fs::path& library) {
     fs::path result=apps/L"common"/directory;
     return !directory.empty()&&fs::is_regular_file(result/L"coldfear_retail.exe")?result:fs::path{};
 }
-static fs::path discover() {
+static fs::path discoverGog() {
+    wchar_t path[32768]{};DWORD bytes=sizeof(path);
+    if(RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\GOG.com\\Games\\1297439746",L"path",RRF_RT_REG_SZ,nullptr,path,&bytes)==ERROR_SUCCESS)return path;
+    bytes=sizeof(path);
+    if(RegGetValueW(HKEY_CURRENT_USER,L"SOFTWARE\\Atari\\ColdFear",L"Install Path",RRF_RT_REG_SZ,nullptr,path,&bytes)==ERROR_SUCCESS)return path;
+    return {};
+}
+static fs::path discoverSteam() {
     wchar_t steam[32768]{};DWORD bytes=sizeof(steam);
     if(RegGetValueW(HKEY_CURRENT_USER,L"Software\\Valve\\Steam",L"SteamPath",RRF_RT_REG_SZ,nullptr,steam,&bytes)!=ERROR_SUCCESS)return {};
     fs::path root=steam,found=libraryGame(root);if(!found.empty())return found;
@@ -97,6 +118,13 @@ static fs::path discover() {
         found=libraryGame(wide(path));if(!found.empty())return found;
     }
     return {};
+}
+static fs::path discover() {
+    auto steam=discoverSteam(),gog=discoverGog();
+    if(!steam.empty()&&detectGame(steam)==Edition::Unknown)steam.clear();
+    if(!gog.empty()&&detectGame(gog)==Edition::Unknown)gog.clear();
+    if(!steam.empty()&&!gog.empty())return {};
+    return steam.empty()?gog:steam;
 }
 static fs::path browse() {
     wchar_t display[MAX_PATH]{},path[MAX_PATH]{};BROWSEINFOW info{};
@@ -138,15 +166,15 @@ static fs::path installFiles(const fs::path& folder,int failAfter=-1) {
             fs::path target=folder/item.name;plainPath(target);plainPath(baseline/item.name);
             if(fs::is_regular_file(target)&&fileHash(target)!=item.hash&&
                _wcsicmp(item.name,L"dinput8.dll")&&_wcsicmp(item.name,L"ColdFearThirdPerson.exe")&&
-               _wcsicmp(item.name,L"ColdFearModernControls.dll")&&_wcsicmp(item.name,L"Uninstall.exe"))
+               _wcsicmp(item.name,L"ColdFearModernControls.dll")&&_wcsicmp(item.name,L"ColdFearModern.exe")&&_wcsicmp(item.name,L"Uninstall.exe"))
                 fs::copy_file(target,baseline/item.name,fs::copy_options::overwrite_existing);
         }
-        std::ofstream marker(baseline/L"complete");marker<<"0.6.14\n";marker.flush();
+        std::ofstream marker(baseline/L"complete");marker<<"0.6.15\n";marker.flush();
         if(!marker)throw std::runtime_error("Cannot record original files.");
     }
     for(const auto& item:payload)plainPath(folder/item.name);
     SYSTEMTIME now{};GetLocalTime(&now);wchar_t label[96]{};
-    swprintf_s(label,L"0.6.14-%04u%02u%02u-%02u%02u%02u-%lu",now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond,GetCurrentProcessId());
+    swprintf_s(label,L"0.6.15-%04u%02u%02u-%02u%02u%02u-%lu",now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond,GetCurrentProcessId());
     fs::path parent=folder/L"ColdFearModernBackup";fs::create_directories(parent);
     fs::path backup;
     for(unsigned sequence=0;;++sequence) {
@@ -208,7 +236,7 @@ static int run() {
         std::wstring question=L"Install to:\n\n"+folder.wstring()+L"\n\nExisting settings are preserved. Replaced files are backed up.";
         if(MessageBoxW(nullptr,question.c_str(),title,MB_OKCANCEL|MB_ICONQUESTION)!=IDOK)return 0;
     }
-    if(!supportedGame(folder))throw std::runtime_error("Select an unmodified supported Steam installation of Cold Fear. The executable checksum did not match.");
+    selectEdition(detectGame(folder));
     if(gameRunning())throw std::runtime_error("Close Cold Fear and its camera helper, then run this installer again. No game files were changed.");
     if(!knownProxy(folder/L"dinput8.dll"))throw std::runtime_error("Another dinput8.dll is installed. This installer cannot replace a different input proxy.");
     if(!writable(folder)) {
@@ -220,7 +248,8 @@ static int run() {
         return 0;
     }
     fs::path backup=installFiles(folder);
-    std::wstring message=L"Installation complete.\n\nLaunch Cold Fear through Steam. F4 toggles the mod.\n\nBackups:\n"+backup.wstring()+L"\n\nRead README.md for controls, known issues and removal instructions.";
+    std::wstring launch=edition==Edition::Gog?L"Launch ColdFearModern.exe in the game folder. GOG input and display fixes are preserved.":L"Launch Cold Fear through Steam.";
+    std::wstring message=L"Installation complete ("+std::wstring(edition==Edition::Gog?L"GOG":L"Steam")+L").\n\n"+launch+L" F4 toggles the mod.\n\nBackups:\n"+backup.wstring()+L"\n\nSee README.md for controls and removal.";
     MessageBoxW(nullptr,message.c_str(),title,MB_OK|MB_ICONINFORMATION);return 0;
 #endif
 }

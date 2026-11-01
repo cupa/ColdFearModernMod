@@ -1,7 +1,7 @@
 #pragma once
 struct Removal {fs::path file,original;bool restore;};
 static bool runtimeFile(const wchar_t* name) {
-    return !_wcsicmp(name,L"dinput8.dll")||!_wcsicmp(name,L"ColdFearModernControls.dll")||!_wcsicmp(name,L"ColdFearThirdPerson.exe");
+    return !_wcsicmp(name,L"dinput8.dll")||!_wcsicmp(name,L"ColdFearModernControls.dll")||!_wcsicmp(name,L"ColdFearThirdPerson.exe")||!_wcsicmp(name,L"ColdFearModern.exe");
 }
 static fs::path uninstallFiles(const fs::path& folder,int failAfter=-1) {
     plainPath(folder);plainPath(folder/L"ColdFearModernBackup");
@@ -21,7 +21,7 @@ static fs::path uninstallFiles(const fs::path& folder,int failAfter=-1) {
         if(matches)changes.push_back({target,original,restore});
     }
     fs::path resolution=folder/L"res.bin";plainPath(resolution);bool reset=false;
-    if(fs::is_regular_file(resolution)) {
+    if(edition==Edition::Steam&&fs::is_regular_file(resolution)) {
         auto data=readFile(resolution);
         if(data.size()==sizeof(DWORD)) {DWORD value=0;memcpy(&value,data.data(),sizeof(value));reset=value>4;}
     }
@@ -64,8 +64,9 @@ static fs::path uninstallFiles(const fs::path& folder,int failAfter=-1) {
     if(folder.empty())folder=discover();
     if(folder.empty())folder=browse();
     if(folder.empty())return 0;
-    if(!supportedGame(folder))throw std::runtime_error("Select the supported Steam Cold Fear game folder.");
-    std::wstring question=L"Uninstall Cold Fear Modern Third Person from:\n\n"+folder.wstring()+L"\n\nSaves and backups are kept. Modified settings and unfamiliar files are kept. An extended display preset is reset to 1024 x 768.";
+    selectEdition(detectGame(folder));
+    std::wstring details=edition==Edition::Gog?L"GOG controller support and display settings are kept.":L"An extended display preset is reset to 1024 x 768.";
+    std::wstring question=L"Uninstall Cold Fear Modern Third Person from:\n\n"+folder.wstring()+L"\n\nSaves, backups and edited settings are kept. "+details;
     if(MessageBoxW(nullptr,question.c_str(),title,MB_OKCANCEL|MB_ICONQUESTION)!=IDOK)return 0;
     if(gameRunning())throw std::runtime_error("Close Cold Fear and its camera helper, then run the uninstaller again.");
     if(!writable(folder)) {

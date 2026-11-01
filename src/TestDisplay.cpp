@@ -2,6 +2,24 @@
 #include "DisplayPlugin.cpp"
 #include <cstdlib>
 static void check(bool ok,const char* message){if(!ok){printf("FAIL: %s\n",message);exit(1);}}
+static uint32_t blendState,blendValue,blendDx;
+static __declspec(naked) void blendTail(){__asm{
+    mov blendState,eax
+    mov blendValue,ecx
+    mov blendDx,edx
+    ret
+}}
+static void testBlend(uint32_t state,uint32_t value,uint32_t expected){
+    afterBlend=reinterpret_cast<uintptr_t>(blendTail);
+    __asm{
+        mov edx,12345678h
+        push value
+        push state
+        call hookBlend
+        add esp,8
+    }
+    check(blendState==state&&blendValue==expected&&blendDx==0x12345678,"blend hook arguments and registers");
+}
 static __declspec(naked) void nativeTail(){__asm{ret}}
 static __declspec(naked) void startupTail(){__asm{
     add esp,4
@@ -65,6 +83,9 @@ struct FakeStartupCursor {
     static BOOL set(const RECT* value){released=value==nullptr;if(value)applied=*value;return TRUE;}
 };
 int main(){
+    testBlend(171,0xffffffff,1);
+    for(uint32_t operation=1;operation<=5;++operation)testBlend(171,operation,operation);
+    testBlend(170,0xffffffff,0xffffffff);testBlend(172,0xffffffff,0xffffffff);
     RECT stale{0,0,1024,768};
     check(correctedStartupClip<FakeStartupCursor>(&stale)&&FakeStartupCursor::applied.left==-1920&&FakeStartupCursor::applied.right==640&&FakeStartupCursor::applied.bottom==1460,"startup confinement uses actual screen coordinates and full native resolution instead of stale dimensions");
     correctedStartupClip<FakeStartupCursor>(nullptr);check(FakeStartupCursor::released,"native cursor release stays a release");
@@ -115,10 +136,22 @@ int main(){
     const BYTE c[]={0x8b,0x8b,0xb8,0xd3,0,0};memcpy(image+0xc7c3,c,sizeof(c));
     const BYTE d[]={0x55,0x8b,0xec,0x8b,0x45,8};memcpy(image+0x92b0,d,sizeof(d));
     const BYTE clip[]={0xff,0x15,0x1c,0x53,0x8a,0};memcpy(image+0x22b8,clip,sizeof(clip));
+    const BYTE blend[]={0x8b,0x44,0x24,4,0x8b,0x4c,0x24,8};memcpy(image+0x239810,blend,sizeof(blend));
+    const BYTE cold[]={0x89,0x58,0xfc},reset[]={0x89,0x68,0xfc};memcpy(image+0x23a143,cold,sizeof(cold));memcpy(image+0x23a7a3,reset,sizeof(reset));
+    const BYTE focus[]={0x74,5};memcpy(image+0x2843,focus,sizeof(focus));
     image[0x92b0]=0;check(!installPatches()&&image[0x2949]==a[0],"unsupported code rejected before any patch");image[0x92b0]=d[0];
-    check(installPatches()&&installed&&image[0x2949]==0xe9&&image[0xc750]==0xe9&&image[0xc7c3]==0xe9&&image[0x92b0]==0xe9&&image[0x22b8]==0xe8,"all verified native sites installed");
+    image[0x239810]=0;check(!installPatches()&&image[0x2949]==a[0],"unknown renderer code rejected before any patch");image[0x239810]=blend[0];
+    image[0x23a7a3]=0;check(!installPatches()&&image[0x2949]==a[0],"unknown reset code rejected before any patch");image[0x23a7a3]=reset[0];
+    check(installPatches()&&installed&&image[0x2949]==0xe9&&image[0xc750]==0xe9&&image[0xc7c3]==0xe9&&image[0x92b0]==0xe9&&image[0x22b8]==0xe8&&image[0x239810]==0xe9,"all verified native sites installed");
+    check(image[0x23a144]==0x50&&image[0x23a7a4]==0x50,"cold and reset texture-stage caches initialize to zero");
+    check(image[0x2843]==0xeb&&image[0x2844]==5,"focus changes bypass automatic pause only");
     int32_t clipDisplacement;memcpy(&clipDisplacement,image+0x22b9,4);check(gameBase+0x22b8+5+clipDisplacement==reinterpret_cast<uintptr_t>(startupClip)&&image[0x22bd]==0x90,"startup cursor call uses stdcall replacement and retains instruction length");
     MEMORY_BASIC_INFORMATION info{};VirtualQuery(image+0xc750,&info,sizeof(info));check(info.Protect==PAGE_READWRITE,"shared-page protection restored after patch writes");
     int32_t displacement;memcpy(&displacement,image+0xc750+1,4);check(gameBase+0xc750+5+displacement==reinterpret_cast<uintptr_t>(hookCycle),"relative branch destination correct");
+    memcpy(image+0x2949,a,sizeof(a));memcpy(image+0xc750,b,sizeof(b));memcpy(image+0xc7c3,c,sizeof(c));
+    memcpy(image+0x92b0,d,sizeof(d));memcpy(image+0x22b8,clip,sizeof(clip));memset(image+0x239810,0,sizeof(blend));
+    memcpy(image+0x23a143,cold,sizeof(cold));memcpy(image+0x23a7a3,reset,sizeof(reset));
+    memcpy(image+0x2843,focus,sizeof(focus));
+    fixAltTab=false;check(installPatches()&&image[0x239810]==0&&image[0x23a144]==0x58&&image[0x23a7a4]==0x68&&image[0x2843]==0x74,"graphics correction can be disabled independently");fixAltTab=true;
     VirtualFree(image,0,MEM_RELEASE);puts("Display menu, persistence, startup and x86 hook checks passed.");return 0;
 }
