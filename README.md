@@ -24,6 +24,7 @@ Do not install the Steam package over GOG or another input proxy.
 - Keyboard, Xbox and native USB DualSense support, including menus.
 - Original cutscene cameras and immediate camera placement after doors.
 - 1080p, 1440p, 4K and 1280×800 resolution options.
+- Steam Alt-Tab graphics fix for white corruption and broken textures.
 
 ## Controls
 
