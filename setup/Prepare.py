@@ -9,6 +9,9 @@ spec = importlib.util.spec_from_file_location("release_package", ROOT / "Package
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)
 previous_proxies = (
+    "f4763d63b1ca672f792509c3e9d84a9e41c94673aa988022f9d05c295ea003d3",
+    "8b8800b12a1a808e5392bd8537a766428c4c15cf55d9e19a88820c0965e6fdc9",
+    "c4678759f86e3f93ed07367a0782770fc77261b8629575a22d648722a0c5223c",
     "2ae3afc958d16ef6ae9010af9ebf801587e81744599851110a94ebd4655d781b",
     "d0010f078616b0d8c4fe82f389818f7f2436929b8c8a15a164a255f7807f1b39",
     "ad897be3c24be9256b2bdfc6a01ae2fe0a00e4a5c2ff3237fa5b56e8c930e505",

@@ -1,11 +1,13 @@
 // Display extension for the original Steam build.
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
 #include <unknwn.h>
 #include "DisplayModes.h"
+#include "CameraStartup.h"
 #pragma comment(lib,"user32.lib")
 static Display::Modes modes;
 static uintptr_t gameBase;
@@ -31,8 +33,42 @@ static void logLine(const char* text) {
     if(f==INVALID_HANDLE_VALUE)return;
     DWORD done=0;WriteFile(f,text,static_cast<DWORD>(strlen(text)),&done,nullptr);CloseHandle(f);
 }
+struct Patch {uint32_t rva;const BYTE* expected;size_t length;const void* destination;bool call=false;bool bytes=false;};
+static bool applyPatches(const Patch* patches,size_t patchCount) {
+    if(patchCount>20)return false;
+    for(size_t i=0;i<patchCount;++i){const auto& p=patches[i];if(memcmp(reinterpret_cast<void*>(gameBase+p.rva),p.expected,p.length)){
+        char message[100];sprintf_s(message,"Unexpected game code at RVA %06x. Patch group skipped.\r\n",p.rva);logLine(message);return false;
+    }}
+    DWORD protections[20]{};
+    size_t unlocked=0;
+    for(size_t i=0;i<patchCount;++i){
+        const auto& p=patches[i];
+        if(!VirtualProtect(reinterpret_cast<void*>(gameBase+p.rva),p.length,PAGE_EXECUTE_READWRITE,&protections[unlocked]))break;
+        ++unlocked;
+    }
+    if(unlocked!=patchCount){
+        for(size_t i=unlocked;i-- >0;){DWORD ignored;VirtualProtect(reinterpret_cast<void*>(gameBase+patches[i].rva),patches[i].length,protections[i],&ignored);}
+        return false;
+    }
+    for(size_t i=0;i<patchCount;++i){
+        const auto& p=patches[i];BYTE* target=reinterpret_cast<BYTE*>(gameBase+p.rva);
+        if(p.bytes){memcpy(target,p.destination,p.length);FlushInstructionCache(GetCurrentProcess(),target,p.length);continue;}
+        target[0]=p.call?0xe8:0xe9;int32_t displacement=static_cast<int32_t>(reinterpret_cast<uintptr_t>(p.destination)-reinterpret_cast<uintptr_t>(target)-5);
+        memcpy(target+1,&displacement,4);memset(target+5,0x90,p.length-5);
+        FlushInstructionCache(GetCurrentProcess(),target,p.length);
+    }
+    // Restore shared-page protections in reverse order.
+    for(size_t i=patchCount;i-- >0;){DWORD ignored;VirtualProtect(reinterpret_cast<void*>(gameBase+patches[i].rva),patches[i].length,protections[i],&ignored);}
+    return true;
+}
+#include "WidescreenHooks.h"
+
 static uint32_t startupSlot;
-static Display::Mode desktopMode{2560,1440};
+static Display::Mode desktopMode{};
+static Display::Mode forcedMode{};
+enum class StartupResolution { Automatic, Saved, Desktop };
+static StartupResolution startupResolution=StartupResolution::Automatic;
+static bool resolutionReady;
 #ifndef DISPLAY_TEST
 static bool supported(uint32_t width,uint32_t height);
 static void startCameraHelper();
@@ -40,31 +76,46 @@ static void startCameraHelper();
 static bool test4kAvailable=true,testDeckAvailable=true;
 static bool supported(uint32_t width,uint32_t height){return (width!=3840||height!=2160||test4kAvailable)&&(width!=1280||height!=800||testDeckAvailable);}
 #endif
+static Display::Mode chooseStartupMode(uint32_t slot,Display::Mode native) {
+    const auto valid=[](Display::Mode m){return m.width>=640&&m.height>=480&&m.width<=16384&&m.height<=16384;};
+    const bool desktopAvailable=valid(desktopMode);
+    const auto available=[&](Display::Mode m){
+        return valid(m)&&((m.width==desktopMode.width&&m.height==desktopMode.height)||supported(m.width,m.height));
+    };
+    if(forcedMode.width||forcedMode.height) {
+        if(available(forcedMode))return forcedMode;
+        logLine("Forced resolution unavailable. Checking the saved and desktop modes.\r\n");
+    }
+    // The stock game can write these slots without a menu selection.
+    if(desktopAvailable&&(startupResolution==StartupResolution::Desktop||
+       (startupResolution==StartupResolution::Automatic&&slot<5)))return desktopMode;
+    const auto saved=modes.loadToken(slot);
+    if(saved.width&&saved.height){
+        if(available(saved))return saved;
+        logLine("Saved display unavailable. Using the desktop or game default.\r\n");
+    }
+    return desktopAvailable?desktopMode:native;
+}
 static void __cdecl readStartup(uint32_t* config) {
     gameWindow=reinterpret_cast<HWND>(config[1]);
     HANDLE f=CreateFileW(resolutionPath,GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
     DWORD slot=0xffffffff,done=0;
     if(f!=INVALID_HANDLE_VALUE){if(!ReadFile(f,&slot,4,&done,nullptr)||done!=4)slot=0xffffffff;CloseHandle(f);}
     startupSlot=slot;
-    int index=modes.loadedIndex(slot);
-    if(index>=0&&static_cast<size_t>(index)<modes.count){
-        Display::Mode selected=modes.values[index];
-        if(!supported(selected.width,selected.height)) {
-            if(supported(desktopMode.width,desktopMode.height))selected=desktopMode;
-            else selected={config[3],config[4]};
-            logLine("Saved display is unavailable; using desktop/safe dimensions for this launch.\r\n");
-        }
-        config[3]=selected.width;config[4]=selected.height;
+    const Display::Mode selected=chooseStartupMode(slot,{config[3],config[4]});
+    config[3]=selected.width;config[4]=selected.height;
+    modes.add(selected.width,selected.height);
+    Wide::setCanvas(static_cast<float>(selected.width),static_cast<float>(selected.height));
+    resolutionReady=true;
 #ifndef DISPLAY_TEST
-        *reinterpret_cast<uint32_t*>(gameBase+0x361208)=modes.selection(config[3],config[4]);
-        HWND window=reinterpret_cast<HWND>(config[1]);
-        RECT rect{0,0,static_cast<LONG>(config[3]),static_cast<LONG>(config[4])};
-        DWORD style=static_cast<DWORD>(GetWindowLongW(window,GWL_STYLE));
-        DWORD exStyle=static_cast<DWORD>(GetWindowLongW(window,GWL_EXSTYLE));
-        AdjustWindowRectEx(&rect,style,FALSE,exStyle);
-        SetWindowPos(window,nullptr,0,0,rect.right-rect.left,rect.bottom-rect.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
+    *reinterpret_cast<uint32_t*>(gameBase+0x361208)=modes.selection(selected.width,selected.height);
+    HWND window=gameWindow;
+    RECT rect{0,0,static_cast<LONG>(selected.width),static_cast<LONG>(selected.height)};
+    DWORD style=static_cast<DWORD>(GetWindowLongW(window,GWL_STYLE));
+    DWORD exStyle=static_cast<DWORD>(GetWindowLongW(window,GWL_EXSTYLE));
+    AdjustWindowRectEx(&rect,style,FALSE,exStyle);
+    SetWindowPos(window,nullptr,0,0,rect.right-rect.left,rect.bottom-rect.top,SWP_NOMOVE|SWP_NOZORDER|SWP_NOACTIVATE);
 #endif
-    }
 #ifndef DISPLAY_TEST
     startCameraHelper();
 #endif
@@ -79,10 +130,11 @@ static void __cdecl labelMenu(uint32_t* registers) {
     Display::Mode mode=modes.find(width);registers[6]=mode.width;registers[5]=mode.height;
 }
 static void __cdecl saveResolution(uint32_t width) {
+    if(!resolutionReady)return;
     int i=modes.index(width);if(i<0)return;
     HANDLE f=CreateFileW(resolutionPath,GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
     if(f==INVALID_HANDLE_VALUE){logLine("Could not save res.bin.\r\n");return;}
-    DWORD slot=modes.savedIndex(static_cast<size_t>(i)),done=0;
+    DWORD slot=modes.saveToken(static_cast<size_t>(i)),done=0;
     bool ok=WriteFile(f,&slot,sizeof(slot),&done,nullptr)&&done==sizeof(slot);
     CloseHandle(f);if(!ok)logLine("Could not write resolution selection.\r\n");
 }
@@ -176,7 +228,6 @@ static BOOL WINAPI startupClip(const RECT* requested) {
     (void)requested;return TRUE;
 #endif
 }
-struct Patch {uint32_t rva;const BYTE* expected;size_t length;const void* destination;bool call=false;bool bytes=false;};
 static bool installPatches() {
     static const BYTE startup[]={0x8d,0x4d,0xc0,0x51,0xe8,0xce,0x0f,0x00,0x00};
     static const BYTE cycle[]={0x81,0xff,0xe6,0x00,0x00,0x00};
@@ -197,29 +248,9 @@ static bool installPatches() {
 #ifndef DISPLAY_TEST
     if(gameBase!=0x400000)return false;
 #endif
-    for(size_t i=0;i<patchCount;++i){const auto& p=patches[i];if(memcmp(reinterpret_cast<void*>(gameBase+p.rva),p.expected,p.length))return false;}
-    DWORD protections[sizeof(patches)/sizeof(patches[0])]{};
-    size_t unlocked=0;
-    for(size_t i=0;i<patchCount;++i){
-        const auto& p=patches[i];
-        if(!VirtualProtect(reinterpret_cast<void*>(gameBase+p.rva),p.length,PAGE_EXECUTE_READWRITE,&protections[unlocked]))break;
-        ++unlocked;
-    }
-    if(unlocked!=patchCount){
-        for(size_t i=0;i<unlocked;++i){DWORD ignored;VirtualProtect(reinterpret_cast<void*>(gameBase+patches[i].rva),patches[i].length,protections[i],&ignored);}
-        return false;
-    }
     afterBlend=gameBase+0x239818;
     afterStartup=gameBase+0x2952;nativeInit=gameBase+0x3920;afterCycle=gameBase+0xc793;afterLabel=gameBase+0xc894;
-    for(size_t i=0;i<patchCount;++i){
-        const auto& p=patches[i];BYTE* target=reinterpret_cast<BYTE*>(gameBase+p.rva);
-        if(p.bytes){memcpy(target,p.destination,p.length);FlushInstructionCache(GetCurrentProcess(),target,p.length);continue;}
-        target[0]=p.call?0xe8:0xe9;int32_t displacement=static_cast<int32_t>(reinterpret_cast<uintptr_t>(p.destination)-reinterpret_cast<uintptr_t>(target)-5);
-        memcpy(target+1,&displacement,4);memset(target+5,0x90,p.length-5);
-        FlushInstructionCache(GetCurrentProcess(),target,p.length);
-    }
-    // Restore shared-page protections in reverse order.
-    for(size_t i=patchCount;i-- >0;){DWORD ignored;VirtualProtect(reinterpret_cast<void*>(gameBase+patches[i].rva),patches[i].length,protections[i],&ignored);}
+    if(!applyPatches(patches,patchCount))return false;
     if(fixAltTab)logLine("Alt-Tab blend, texture-stage cache and focus-handler corrections installed.\r\n");
     installed=true;logLine("Resolution menu extension installed. Selection applies on next launch.\r\n");return true;
 }
@@ -229,7 +260,9 @@ static void configure();
 static void tryInstall(){
     if(!compatibleGame||installed)return;
     if(!configured){configure();configured=true;enabled=GetPrivateProfileIntW(L"Display",L"Enabled",1,settingsPath)!=0;}
-    if(enabled)installPatches();
+    if(enabled&&installPatches()){
+        logLine(Wide::install()?"Widescreen presentation configured.\r\n":"Widescreen hooks unavailable; base display and camera remain active.\r\n");
+    }
 }
 static bool supported(uint32_t width,uint32_t height){
     DEVMODEW dm{};dm.dmSize=sizeof(dm);
@@ -244,6 +277,17 @@ static void configure() {
     fixAltTab=GetPrivateProfileIntW(L"Graphics",L"FixAltTab",1,settingsPath)!=0;
     swprintf_s(resolutionPath,L"%s\\res.bin",gameFolder);
     swprintf_s(logPath,L"%s\\ColdFearDisplay.log",gameFolder);
+    const auto desktop=GetPrivateProfileIntW(L"Display",L"UseDesktopResolution",-1,settingsPath);
+    startupResolution=desktop==0?StartupResolution::Saved:desktop==1?StartupResolution::Desktop:StartupResolution::Automatic;
+    forcedMode={GetPrivateProfileIntW(L"Display",L"ResolutionWidth",0,settingsPath),
+                GetPrivateProfileIntW(L"Display",L"ResolutionHeight",0,settingsPath)};
+    Wide::correctHud=GetPrivateProfileIntW(L"Widescreen",L"CorrectHUD",1,settingsPath)!=0;
+    Wide::edgeHud=GetPrivateProfileIntW(L"Widescreen",L"HUDAtEdges",1,settingsPath)!=0;
+    Wide::edgeAmount=std::min(100u,GetPrivateProfileIntW(L"Widescreen",L"HUDEdgePercent",100,settingsPath))*0.01f;
+    Wide::correctProjection=GetPrivateProfileIntW(L"Widescreen",L"CorrectFOV",1,settingsPath)!=0;
+    Wide::hideBorders=GetPrivateProfileIntW(L"Widescreen",L"RemoveCutsceneBorders",0,settingsPath)!=0;
+    auto video=GetPrivateProfileIntW(L"Widescreen",L"VideoMode",1,settingsPath);
+    Wide::videoMode=video==0?Display::VideoMode::Native:video==2?Display::VideoMode::Fill:Display::VideoMode::Fit;
     uint32_t width=GetPrivateProfileIntW(L"Display",L"NativeWidth",0,settingsPath);
     uint32_t height=GetPrivateProfileIntW(L"Display",L"NativeHeight",0,settingsPath);
     DEVMODEW dm{};dm.dmSize=sizeof(dm);
@@ -252,20 +296,13 @@ static void configure() {
     if(supported(width,height)&&modes.add(width,height)){
         char line[128];sprintf_s(line,"Native display: %u x %u. Menu choices: %u.\r\n",width,height,static_cast<unsigned>(modes.count));logLine(line);
     }else logLine("Native mode unsupported or the mode list is full. Fixed choices retained.\r\n");
+    if(forcedMode.width&&forcedMode.height&&supported(forcedMode.width,forcedMode.height))modes.add(forcedMode.width,forcedMode.height);
 }
 static void startCameraHelper(){
     if(!GetPrivateProfileIntW(L"CameraMod",L"AutoStartHelper",1,settingsPath))return;
-    wchar_t mutexName[128];swprintf_s(mutexName,L"Local\\ColdFearThirdPerson.Instance.%lu",GetCurrentProcessId());
-    HANDLE existing=OpenMutexW(SYNCHRONIZE,FALSE,mutexName);
-    if(existing){CloseHandle(existing);return;}
-    wchar_t helper[MAX_PATH];swprintf_s(helper,L"%s\\ColdFearThirdPerson.exe",gameFolder);
-    DWORD attributes=GetFileAttributesW(helper);
-    if(attributes==INVALID_FILE_ATTRIBUTES||(attributes&FILE_ATTRIBUTE_DIRECTORY))return;
-    wchar_t command[MAX_PATH+96];swprintf_s(command,L"\"%s\" --enable --wait-ready --pid %lu",helper,GetCurrentProcessId());
-    STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
-    if(CreateProcessW(helper,command,nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,gameFolder,&startup,&process)){
-        CloseHandle(process.hThread);CloseHandle(process.hProcess);logLine("Camera/controller helper started automatically.\r\n");
-    }else {char line[128];sprintf_s(line,"Camera/controller helper could not start: Windows error %lu.\r\n",GetLastError());logLine(line);}
+    DWORD error;
+    if(launchCameraHelper(gameFolder,error))logLine("Camera/controller helper started automatically.\r\n");
+    else if(error){char line[128];sprintf_s(line,"Camera/controller helper could not start: Windows error %lu.\r\n",error);logLine(line);}
 }
 static INIT_ONCE systemOnce=INIT_ONCE_STATIC_INIT;
 static HMODULE systemInput;

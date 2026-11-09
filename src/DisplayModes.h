@@ -35,6 +35,16 @@ struct Modes {
         if(slot>=15)return -1;
         return static_cast<int>(slot>=8?slot+1:slot);
     }
+    uint32_t saveToken(size_t i)const {
+        const auto mode=values[i];
+        return i>=5&&i<9?savedIndex(i):0x80000000u|(mode.width<<16)|mode.height;
+    }
+    Mode loadToken(uint32_t token)const {
+        if(token==0xffffffff)return {};
+        if(token&0x80000000u)return {(token>>16)&0x7fff,token&0xffff};
+        int i=loadedIndex(token);
+        return i>=0&&static_cast<size_t>(i)<count?values[i]:Mode{};
+    }
     Mode find(uint32_t key)const {int i=index(key);return values[i<0?2:i];}
     uint32_t cycle(uint32_t key,int action)const {
         int i=index(key);if(i<0)i=2;

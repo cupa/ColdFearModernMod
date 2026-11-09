@@ -1,8 +1,5 @@
 #pragma once
 struct Removal {fs::path file,original;bool restore;};
-static bool runtimeFile(const wchar_t* name) {
-    return !_wcsicmp(name,L"dinput8.dll")||!_wcsicmp(name,L"ColdFearModernControls.dll")||!_wcsicmp(name,L"ColdFearThirdPerson.exe")||!_wcsicmp(name,L"ColdFearModern.exe");
-}
 static fs::path uninstallFiles(const fs::path& folder,int failAfter=-1) {
     plainPath(folder);plainPath(folder/L"ColdFearModernBackup");
     fs::path baseline=folder/L"ColdFearModernBackup"/L"Original";plainPath(baseline);
@@ -18,6 +15,9 @@ static fs::path uninstallFiles(const fs::path& folder,int failAfter=-1) {
             else throw std::runtime_error("A runtime file is unfamiliar or modified. No files were removed. Restore this mod's original files before uninstalling.");
         }
         bool restore=fs::is_regular_file(baseline/L"complete")&&fs::is_regular_file(original);
+        if(!_wcsicmp(item.name,L"d3d9.dll"))restore=false;
+        if(restore&&!_wcsicmp(item.name,L"dinput8.dll")&&fileHash(original)!=widescreenLoader)
+            throw std::runtime_error("The original widescreen loader backup is unfamiliar. No files were removed.");
         if(matches)changes.push_back({target,original,restore});
     }
     fs::path resolution=folder/L"res.bin";plainPath(resolution);bool reset=false;

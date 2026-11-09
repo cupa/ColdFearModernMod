@@ -14,7 +14,7 @@
 #include "Payload.h"
 #include "../src/GameEdition.h"
 namespace fs=std::filesystem;
-static constexpr wchar_t title[]=L"Cold Fear Modern Third Person 0.6.15";
+static constexpr wchar_t title[]=L"Cold Fear Modern Third Person 0.6.16";
 struct PayloadView {
     const PayloadFile* first;size_t count;
     const PayloadFile* begin() const{return first;}
@@ -155,9 +155,54 @@ static void plainPath(const fs::path& path) {
     if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_REPARSE_POINT))
         throw std::runtime_error("A mod or backup path is a link. Restore it to a regular file or folder first.");
 }
+static bool runtimeFile(const wchar_t* name) {
+    return !_wcsicmp(name,L"dinput8.dll")||!_wcsicmp(name,L"d3d9.dll")||
+           !_wcsicmp(name,L"ColdFearModernControls.dll")||!_wcsicmp(name,L"ColdFearThirdPerson.exe");
+}
+static bool legacyLauncher(const fs::path& file) {
+    const auto hash=fileHash(file);
+    return hash=="6bed8575e2264fa2df32eec1ebf70a32b606352a1b01dd2663053a9c8d9dee21"||
+           hash=="b9e9dfc262d8df33a40db411fdffcdc5c86fa7c7fd69e29eb34601bfcc3df0b4"||
+           hash=="de674e4ee1ae3f3346617758871384aa6b97f022f214acaa8c5be66cbeb51210";
+}
+static constexpr char widescreenLoader[]="9105dadce0e3582c0e1bb8bce408fec8d69c8c8133d3bf4796a6142c09d34ef7";
+static constexpr char widescreenPlugin[]="ad28032a54281ee9015d60a9e3e19bb7c1f39a06a2e129442b282bd9b7bc0eaa";
+static bool replacingWidescreen(const fs::path& folder) {
+    if(edition==Edition::Gog)return false;
+    const auto proxy=folder/L"dinput8.dll";
+    plainPath(proxy);
+    if(knownProxy(proxy))return false;
+    const auto scripts=folder/L"scripts";
+    const auto plugin=scripts/L"ColdFear.WidescreenFix.asi";
+    plainPath(scripts);plainPath(plugin);
+    if(fileHash(proxy)!=widescreenLoader||!fs::is_regular_file(plugin)||fileHash(plugin)!=widescreenPlugin)
+        throw std::runtime_error("Another dinput8.dll is installed. Setup can replace the official Cold Fear Widescreen Fix only.");
+    const auto inspect=[&](const fs::path& file){
+        if(_wcsicmp(file.c_str(),plugin.c_str())&&!_wcsicmp(file.extension().c_str(),L".asi"))
+            throw std::runtime_error("The widescreen loader has other ASI plugins. Back them up and remove them before installing.");
+    };
+    for(const auto& entry:fs::directory_iterator(folder))inspect(entry.path());
+    for(const auto* name:{L"scripts",L"plugins",L"update",L"modloader"}){
+        auto directory=folder/name;plainPath(directory);
+        if(!fs::is_directory(directory))continue;
+        for(const auto& entry:fs::recursive_directory_iterator(directory)){
+            plainPath(entry.path());inspect(entry.path());
+        }
+    }
+    return true;
+}
 static fs::path installFiles(const fs::path& folder,int failAfter=-1) {
-    if(!knownProxy(folder/L"dinput8.dll"))throw std::runtime_error("Another dinput8.dll is installed. Use a clean game folder; this installer cannot chain another mod.");
     plainPath(folder);plainPath(folder/L"ColdFearModernBackup");
+    const bool replaceWidescreen=replacingWidescreen(folder);
+    for(const auto& item:payload) {
+        auto target=folder/item.name;
+        plainPath(target);
+        if(!_wcsicmp(item.name,L"d3d9.dll")&&fs::exists(target)&&fileHash(target)!=item.hash)
+            throw std::runtime_error("Another d3d9.dll is installed. Back it up and move it out of the game folder before installing.");
+    }
+    const auto launcher=folder/L"ColdFearModern.exe";
+    plainPath(launcher);
+    const bool removeLauncher=fs::is_regular_file(launcher)&&legacyLauncher(launcher);
     fs::path baseline=folder/L"ColdFearModernBackup"/L"Original";
     plainPath(baseline);
     if(!fs::exists(baseline/L"complete")) {
@@ -165,16 +210,19 @@ static fs::path installFiles(const fs::path& folder,int failAfter=-1) {
         for(const auto& item:payload) {
             fs::path target=folder/item.name;plainPath(target);plainPath(baseline/item.name);
             if(fs::is_regular_file(target)&&fileHash(target)!=item.hash&&
-               _wcsicmp(item.name,L"dinput8.dll")&&_wcsicmp(item.name,L"ColdFearThirdPerson.exe")&&
-               _wcsicmp(item.name,L"ColdFearModernControls.dll")&&_wcsicmp(item.name,L"ColdFearModern.exe")&&_wcsicmp(item.name,L"Uninstall.exe"))
+               !runtimeFile(item.name)&&_wcsicmp(item.name,L"Uninstall.exe"))
                 fs::copy_file(target,baseline/item.name,fs::copy_options::overwrite_existing);
         }
-        std::ofstream marker(baseline/L"complete");marker<<"0.6.15\n";marker.flush();
+        std::ofstream marker(baseline/L"complete");marker<<"0.6.16\n";marker.flush();
         if(!marker)throw std::runtime_error("Cannot record original files.");
     }
-    for(const auto& item:payload)plainPath(folder/item.name);
+    if(replaceWidescreen) {
+        auto original=baseline/L"dinput8.dll";plainPath(original);
+        if(!fs::exists(original))fs::copy_file(folder/L"dinput8.dll",original);
+        else if(fileHash(original)!=widescreenLoader)throw std::runtime_error("The original loader backup is unfamiliar. No game files were changed.");
+    }
     SYSTEMTIME now{};GetLocalTime(&now);wchar_t label[96]{};
-    swprintf_s(label,L"0.6.15-%04u%02u%02u-%02u%02u%02u-%lu",now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond,GetCurrentProcessId());
+    swprintf_s(label,L"0.6.16-%04u%02u%02u-%02u%02u%02u-%lu",now.wYear,now.wMonth,now.wDay,now.wHour,now.wMinute,now.wSecond,GetCurrentProcessId());
     fs::path parent=folder/L"ColdFearModernBackup";fs::create_directories(parent);
     fs::path backup;
     for(unsigned sequence=0;;++sequence) {
@@ -184,6 +232,12 @@ static fs::path installFiles(const fs::path& folder,int failAfter=-1) {
     std::vector<Installed> completed;
     try {
         if(fs::is_regular_file(folder/L"res.bin"))fs::copy_file(folder/L"res.bin",backup/L"res.bin",fs::copy_options::overwrite_existing);
+        if(removeLauncher) {
+            const auto original=backup/launcher.filename();
+            fs::copy_file(launcher,original);
+            completed.push_back({launcher,original,true});
+            fs::remove(launcher);
+        }
         for(const auto& item:payload) {
             fs::path target=folder/item.name;
             bool exists=fs::exists(target);
@@ -238,7 +292,7 @@ static int run() {
     }
     selectEdition(detectGame(folder));
     if(gameRunning())throw std::runtime_error("Close Cold Fear and its camera helper, then run this installer again. No game files were changed.");
-    if(!knownProxy(folder/L"dinput8.dll"))throw std::runtime_error("Another dinput8.dll is installed. This installer cannot replace a different input proxy.");
+    const bool replaceWidescreen=replacingWidescreen(folder);
     if(!writable(folder)) {
         if(IsUserAnAdmin())throw std::runtime_error("The game folder is not writable. Check its permissions and available disk space.");
         wchar_t self[32768]{};GetModuleFileNameW(nullptr,self,32768);
@@ -248,8 +302,9 @@ static int run() {
         return 0;
     }
     fs::path backup=installFiles(folder);
-    std::wstring launch=edition==Edition::Gog?L"Launch ColdFearModern.exe in the game folder. GOG input and display fixes are preserved.":L"Launch Cold Fear through Steam.";
+    std::wstring launch=L"Launch Cold Fear as usual.";
     std::wstring message=L"Installation complete ("+std::wstring(edition==Edition::Gog?L"GOG":L"Steam")+L").\n\n"+launch+L" F4 toggles the mod.\n\nBackups:\n"+backup.wstring()+L"\n\nSee README.md for controls and removal.";
+    if(replaceWidescreen)message+=L"\n\nThe separate widescreen loader was backed up. Uninstall restores it.";
     MessageBoxW(nullptr,message.c_str(),title,MB_OK|MB_ICONINFORMATION);return 0;
 #endif
 }

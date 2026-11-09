@@ -1,0 +1,2 @@
+EXPORTS
+    Direct3DCreate9=_Direct3DCreate9@4

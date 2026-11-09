@@ -2,22 +2,22 @@ from hashlib import sha256
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
-VERSION = "0.6.15"
+VERSION = "0.6.16"
 ROOT = Path(__file__).resolve().parent
 PLAYER_FILES = (
-    "ColdFearModern.exe", "ColdFearThirdPerson.exe", "ColdFearModernControls.dll", "dinput8.dll",
+    "ColdFearThirdPerson.exe", "ColdFearModernControls.dll", "dinput8.dll",
     "Camera.ini", "ColdFearDisplay.ini", "Enable.cmd", "Disable.cmd",
     "Toggle.cmd", "Status.cmd", "README.md", "CONTROLS.md",
     "LICENSE.md", "INSTALL.md", "Uninstall.exe",
 )
 GOG_FILES = (
-    "ColdFearModern.exe", "ColdFearThirdPerson.exe", "ColdFearModernControls.dll",
+    "ColdFearThirdPerson.exe", "ColdFearModernControls.dll", "d3d9.dll",
     "Camera.ini", "Enable.cmd", "Disable.cmd", "Toggle.cmd", "Status.cmd",
     "README.md", "CONTROLS.md", "LICENSE.md", "INSTALL.md", "Uninstall.exe",
 )
 SOURCE_FILES = (
     ".gitignore", ".gitattributes", ".github/FUNDING.yml",
-    "BuildGog.cmd", "src/Launch.cpp", "src/GameEdition.h",
+    "BuildGog.cmd", "src/GogStartup.cpp", "src/GogStartup.def", "src/CameraStartup.h", "src/GameEdition.h",
     "Build.cmd", "Test.cmd", "Package.py", "README.md", "CONTROLS.md",
     "BUILD.md", "LICENSE.md", "INSTALL.md", "BuildInstaller.cmd",
     "setup/Uninstall.h", "setup/Setup.cpp", "setup/TestSetup.cpp", "setup/Prepare.py",
@@ -29,6 +29,7 @@ SOURCE_FILES = (
     "src/ModernControls.h", "src/ModernControls.def", "src/Controller.h",
     "src/PlayStation.h", "src/TitlePrompt.h", "src/CursorConfinement.h",
     "src/DisplayPlugin.cpp", "src/DisplayPlugin.def", "src/DisplayModes.h",
+    "src/Widescreen.h", "src/WidescreenHooks.h",
     "src/TestControls.cpp", "src/TestController.cpp",
     "src/TestCursorConfinement.cpp", "src/TestDisplay.cpp",
 )
@@ -57,7 +58,7 @@ def main():
     write_zip(player, ROOT / "dist", PLAYER_FILES)
     write_zip(source, ROOT, SOURCE_FILES)
     archives = [player, source]
-    installer = destination / "ColdFearModernThirdPerson-0.6.15-Setup.exe"
+    installer = destination / "ColdFearModernThirdPerson-0.6.16-Setup.exe"
     if installer.is_file():
         installer_zip = destination / f"ColdFearModernThirdPerson-{VERSION}-installer.zip"
         with ZipFile(installer_zip, "w", compression=ZIP_DEFLATED) as archive:
@@ -65,7 +66,7 @@ def main():
             archive.write(ROOT / "dist/Uninstall.exe", "Uninstall.exe")
             for name in ("INSTALL.md", "README.md", "CONTROLS.md", "LICENSE.md"):
                 archive.write(ROOT / name, name)
-        uninstaller = destination / "ColdFearModernThirdPerson-0.6.15-Uninstall.exe"
+        uninstaller = destination / "ColdFearModernThirdPerson-0.6.16-Uninstall.exe"
         uninstaller.write_bytes((ROOT / "dist/Uninstall.exe").read_bytes())
         archives.extend((installer, installer_zip, uninstaller))
     if (ROOT / "dist/gog/Uninstall.exe").is_file():

@@ -1,4 +1,4 @@
-// Cold Fear Third Person v0.6.15. MIT license.
+// Cold Fear Third Person v0.6.16. MIT license.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
@@ -290,7 +290,7 @@ int main(int argc,char** argv) {
     auto dpi=reinterpret_cast<DpiContext>(GetProcAddress(GetModuleHandleW(L"user32.dll"),"SetThreadDpiAwarenessContext"));
     if(dpi){if(!dpi(reinterpret_cast<HANDLE>(-4)))dpi(reinterpret_cast<HANDLE>(-3));}
     else SetProcessDPIAware();
-    puts("Cold Fear Third Person v0.6.15 \n");
+    puts("Cold Fear Third Person v0.6.16 \n");
     const char* action=argc>1?argv[1]:"--enable";
     for(int i=2;i<argc;++i)if(!strcmp(argv[i],"--allow-session-update"))allowSessionUpdate=true;
     for(int i=2;i<argc;++i)if(!strcmp(argv[i],"--pid")&&i+1<argc) {
@@ -327,7 +327,8 @@ int main(int argc,char** argv) {
                 *(slash+1)=0;wcscpy_s(dllPath,settings);wcscat_s(dllPath,L"ColdFearModernControls.dll");wcscat_s(settings,L"Camera.ini");
                 distance=static_cast<float>(GetPrivateProfileIntW(L"Camera",L"ExplorationDistanceCm",180,settings));
                 modern=GetPrivateProfileIntW(L"Controls",L"ModernControls",1,settings)!=0;
-                confineCursor=GetPrivateProfileIntW(L"Controls",L"ConfineCursor",1,settings)!=0;
+                const auto oldCursor=GetPrivateProfileIntW(L"Controls",L"ConfineCursor",1,settings);
+                confineCursor=GetPrivateProfileIntW(L"Controls",L"KeepCursorInGame",oldCursor,settings)!=0;
                 sensitivity=static_cast<float>(GetPrivateProfileIntW(L"Controls",L"MouseSensitivity",250,settings))*0.00001f;
                 shift=GetPrivateProfileIntW(L"Controls",L"HoldShiftToRun",1,settings)!=0;
                 wchar_t duration[64]{};GetPrivateProfileStringW(L"Camera",L"AimTransitionSeconds",L"0.2",duration,64,settings);

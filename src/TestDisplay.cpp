@@ -83,6 +83,18 @@ struct FakeStartupCursor {
     static BOOL set(const RECT* value){released=value==nullptr;if(value)applied=*value;return TRUE;}
 };
 int main(){
+    const Display::Canvas hd{1920,1080},deck{1280,800},classic{1024,768},ultrawide{3440,1440};
+    const auto closeEnough=[](float a,float b){return fabsf(a-b)<0.01f;};
+    check(closeEnough(hd.hudX(0),80)&&closeEnough(hd.hudX(640),560)&&closeEnough(hd.hudX(320),320),"16:9 HUD fits centered 4:3 canvas");
+    check(closeEnough(hd.hudX(0,-1),0)&&closeEnough(hd.hudX(640,1),640),"edge anchoring moves HUD without stretching");
+    check(closeEnough(deck.hudScale(),5.0f/6.0f)&&closeEnough(classic.hudScale(),1),"16:10 scales while 4:3 is unchanged");
+    check(closeEnough(hd.projectionScale(),4.0f/3.0f)&&closeEnough(ultrawide.projectionScale(),43.0f/24.0f)&&closeEnough(classic.projectionScale(),1),"projection preserves baseline framing on wider displays");
+    auto fit=Display::videoBox(hd,640,480,Display::VideoMode::Fit);
+    auto fill=Display::videoBox(hd,640,480,Display::VideoMode::Fill);
+    check(closeEnough(fit.x,240)&&closeEnough(fit.y,0)&&closeEnough(fit.width,1440)&&closeEnough(fit.height,1080),"video fits without stretching");
+    check(closeEnough(fill.x,0)&&closeEnough(fill.y,-180)&&closeEnough(fill.width,1920)&&closeEnough(fill.height,1440),"video fills with centered crop");
+    check(Display::hudEdge(20,360,164,380)==-1&&Display::hudEdge(435,360,600,400)==1&&Display::hudEdge(200,410,440,440)==0,"HUD edge anchors leave center prompts alone");
+    desktopMode={2560,1440};
     testBlend(171,0xffffffff,1);
     for(uint32_t operation=1;operation<=5;++operation)testBlend(171,operation,operation);
     testBlend(170,0xffffffff,0xffffffff);testBlend(172,0xffffffff,0xffffffff);
@@ -109,9 +121,28 @@ int main(){
     testSlot(7,&width,&height);check(width==3840&&height==2160,"4K startup preset applies when the connected display supports it");
     test4kAvailable=false;testSlot(7,&width,&height);check(width==2560&&height==1440,"disconnected 4K TV falls back to desktop dimensions");
     test4kAvailable=true;testSlot(7,&width,&height);check(width==3840&&height==2160,"saved 4K preset survives fallback and applies when TV reconnects");
-    testSlot(4,&width,&height);check(width==1600&&height==1200,"stock saved preset retains dimensions");
-    testSlot(99,&width,&height);check(width==1024&&height==768,"invalid saved preset preserves safe defaults");
+    testSlot(4,&width,&height);check(width==2560&&height==1440,"legacy stock preset does not override the desktop by default");
+    testSlot(99,&width,&height);check(width==2560&&height==1440,"invalid saved preset falls back to the desktop");
     check(initCalls==8,"startup hook replays the native graphics initializer and argument cleanup");
+    forcedMode={1920,1080};testSlot(6,&width,&height);check(width==1920&&height==1080&&Wide::startupCanvas.width==1920,"forced mode drives startup and presentation");
+    forcedMode={3840,2160};test4kAvailable=false;testSlot(5,&width,&height);check(width==1920&&height==1080,"unavailable forced mode keeps the saved mode");test4kAvailable=true;
+    forcedMode={};startupResolution=StartupResolution::Desktop;testSlot(5,&width,&height);check(width==2560&&height==1440,"desktop override uses current display");
+    startupResolution=StartupResolution::Automatic;testSlot(0xffffffff,&width,&height);check(width==2560&&height==1440,"missing saved mode uses desktop");
+    for(auto display:{Display::Mode{2560,1440},Display::Mode{3840,2160},Display::Mode{1280,800}}) {
+        desktopMode=display;testSlot(2,&width,&height);
+        check(width==display.width&&height==display.height,"automatic startup uses 1440p, 4K or 1280x800 instead of the stock preset");
+    }
+    desktopMode={2560,1440};
+    startupResolution=StartupResolution::Saved;testSlot(2,&width,&height);
+    check(width==1024&&height==768,"explicit saved mode keeps a legacy stock preset");
+    startupResolution=StartupResolution::Automatic;
+    testSlot(2,&width,&height);resolutionReady=false;saveResolution(640);startupCall(&width,&height);
+    check(startupSlot==2,"native startup write cannot pin a resolution");
+    saveResolution(1024);startupCall(&width,&height);
+    check(width==1024&&height==768,"an explicit stock menu selection overrides automatic startup");
+    desktopMode={};testSlot(99,&width,&height);
+    check(width==1024&&height==768,"game default is safe when the desktop cannot be read");
+    desktopMode={2560,1440};
     BYTE menu[0xd400]{};auto selected=reinterpret_cast<uint32_t*>(menu+0xd3b8);*selected=1920;
     float floatBefore=0.375f,floatAfter=0;__asm{fld floatBefore}
     cycleCall(menu,230);__asm{fstp floatAfter}
@@ -128,6 +159,8 @@ int main(){
     *selected=1280;check(labelCall(menu,&width,&height)==0x12345678&&height==1024,"stock 1280x1024 label remains unchanged");
     check(modes.add(3440,1440)&&modes.savedIndex(9)==8&&modes.loadedIndex(8)==9,"previous desktop preset slot 8 remains compatible");
     testSlot(8,&width,&height);check(width==3440&&height==1440,"legacy desktop slot still loads its desktop dimensions");
+    testSlot(0x80000000u|(3440u<<16)|1440u,&width,&height);check(width==3440&&height==1440,"saved custom mode does not depend on the menu order");
+    check(modes.loadToken(modes.saveToken(9)).width==3440,"custom mode round trips as dimensions");
     check(modes.add(1280,720)&&modes.find(modes.selection(1280,720)).height==720,"additional duplicate-width desktop mode stays distinct");
     BYTE* image=static_cast<BYTE*>(VirtualAlloc(nullptr,0x4d6000,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE));
     check(image!=nullptr,"mock game image");gameBase=reinterpret_cast<uintptr_t>(image);
@@ -153,5 +186,31 @@ int main(){
     memcpy(image+0x23a143,cold,sizeof(cold));memcpy(image+0x23a7a3,reset,sizeof(reset));
     memcpy(image+0x2843,focus,sizeof(focus));
     fixAltTab=false;check(installPatches()&&image[0x239810]==0&&image[0x23a144]==0x58&&image[0x23a7a4]==0x68&&image[0x2843]==0x74,"graphics correction can be disabled independently");fixAltTab=true;
+    const BYTE quad[]={0x55,0x8b,0xec,0xa0,0x60,0xc4,0x81,0};
+    const BYTE point[]={0x55,0x8b,0xec,0x56,0x57},segment[]={0x55,0x8b,0xec,0x51,0xa1,0x78,0xc4,0x81,0},string[]={0x55,0x8b,0xec,0x83,0xec,0x0c};
+    const BYTE view[]={0xe8,0x37,0xdb,0x1f,0},movie[]={0xe8,0x32,0x4a,0xfa,0xff};
+    const BYTE viewA[]={0xe8,0xe2,0xb1,0x1f,0},viewB[]={0xe8,0xad,0xb1,0x1f,0},viewC[]={0xe8,0x83,0xb1,0x1f,0};
+    const BYTE widget[]={0x55,0x8b,0xec,0x83,0xec,0x1c},item[]={0x55,0x8b,0xec,0xd9,0x45,0x10},mouse[]={0xdb,5,0x94,0xb7,0x87,0};
+    for(auto rva:{0x2b460,0x2b610,0x2b740})memcpy(image+rva,quad,sizeof(quad));
+    memcpy(image+0x2ba20,point,sizeof(point));memcpy(image+0x2bba0,segment,sizeof(segment));
+    for(auto rva:{0x2c8d0,0x2ca50})memcpy(image+rva,string,sizeof(string));
+    memcpy(image+0x2dff4,view,sizeof(view));memcpy(image+0x30949,viewA,sizeof(viewA));
+    memcpy(image+0x3097e,viewB,sizeof(viewB));memcpy(image+0x309a8,viewC,sizeof(viewC));
+    memcpy(image+0x91b90,widget,sizeof(widget));memcpy(image+0x91500,item,sizeof(item));
+    for(auto rva:{0xb961,0x105a2,0x12ced})memcpy(image+rva,mouse,sizeof(mouse));
+    check(!Wide::install()&&image[0x2b460]==quad[0]&&image[0x2949]==0xe9,"unknown FMV code leaves the presentation group and base display intact");
+    memcpy(image+0x86ec9,movie,sizeof(movie));
+    const BYTE topBorder[]={0xe8,0x1d,0xbf,0xf8,0xff},bottomBorder[]={0xe8,0xfb,0xbe,0xf8,0xff};
+    memcpy(image+0x9f81e,topBorder,sizeof(topBorder));memcpy(image+0x9f840,bottomBorder,sizeof(bottomBorder));
+    Wide::hideBorders=true;
+    check(Wide::install()&&image[0x2b460]==0xe9&&image[0x2bba0]==0xe9&&image[0x2ca50]==0xe9,"presentation hooks install together");
+    auto branch=[&](int rva){int32_t delta;memcpy(&delta,image+rva+1,4);return gameBase+rva+5+delta;};
+    check(branch(0x2dff4)==reinterpret_cast<uintptr_t>(Wide::setView)&&branch(0x86ec9)==reinterpret_cast<uintptr_t>(Wide::drawMovie),"projection and movie calls target correct replacements");
+    Wide::setCanvas(2560,1440);
+    check(branch(0xb961)==reinterpret_cast<uintptr_t>(Wide::menuCursorX)&&closeEnough(Wide::cursorScale,0.75f)&&closeEnough(Wide::cursorInset,320),"menu hit testing uses the inverse HUD transform");
+    check(branch(0x9f81e)==reinterpret_cast<uintptr_t>(Wide::skipBorder)&&branch(0x9f840)==reinterpret_cast<uintptr_t>(Wide::skipBorder),"optional border removal patches only the two cutscene bar calls");
+    const auto original=reinterpret_cast<const BYTE*>(Wide::sprite);
+    check(memcmp(original,quad,sizeof(quad))==0&&original[sizeof(quad)]==0xe9,"sprite trampoline retains the complete native prologue");
+    VirtualFree(const_cast<BYTE*>(original),0,MEM_RELEASE);
     VirtualFree(image,0,MEM_RELEASE);puts("Display menu, persistence, startup and x86 hook checks passed.");return 0;
 }

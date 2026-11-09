@@ -18,7 +18,7 @@ static DWORD read(DWORD slot,XINPUT_STATE* value) {
     if(Controls.useGameInput) {
         HMODULE library=GetModuleHandleW(L"dinput8.dll");
         auto native=library?reinterpret_cast<Read>(GetProcAddress(library,"XInputGetState")):nullptr;
-        return native?native(slot,value):ERROR_DEVICE_NOT_CONNECTED;
+        if(native&&native(slot,value)==ERROR_SUCCESS)return ERROR_SUCCESS;
     }
     if(!loaded) {
         loaded=true;
@@ -109,7 +109,7 @@ static void poll() {
     Controls.menuPrevious=Controls.menuButtons;Controls.menuButtons=0;
     Controls.keyPrevious=Controls.keyButtons;
     Controls.keyButtons=((down(VK_CONTROL)||down(VK_LCONTROL)||down(VK_RCONTROL))?1u:0u)|(down(VK_LBUTTON)?2u:0u);
-    PlayStation::enable(!Controls.useGameInput&&Controls.controllerEnabled!=0&&Controls.enabled!=0);
+    PlayStation::enable(Controls.padIndex<0&&Controls.controllerEnabled!=0&&Controls.enabled!=0);
     if(!Controls.controllerEnabled){clear();return;}
     int first=-1,candidate=-1;
     for(int i=0;i<5;++i) {
@@ -119,7 +119,7 @@ static void poll() {
         DWORD now=GetTickCount();
         if(i<4&&!d.online&&static_cast<LONG>(now-d.scanAfter)<0)continue;
 #endif
-        bool found=i==4?(!Controls.useGameInput&&PlayStation::read(next)):read(static_cast<DWORD>(i),&next)==ERROR_SUCCESS;
+        bool found=i==4?PlayStation::read(next):read(static_cast<DWORD>(i),&next)==ERROR_SUCCESS;
         if(!found) {
             d={};
 #ifndef CONTROLS_TEST
